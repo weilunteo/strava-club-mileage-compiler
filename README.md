@@ -8,7 +8,7 @@ This script does not use the Strava API (which requires a paid subscription for 
 
 This script:
 1. Opens Chrome and waits for manual Strava login (2FA required)
-2. Scrapes the club's individual activities (run, swim, bike, walk, hike)
+2. Scrapes the club's individual activities (run, walk, hike)
 3. Assigns athletes to divisions (FMD, IND, EDR, BEK, VIC)
 4. Calculates weekly mileage and points per division
 5. Writes the results directly into a formatted Google Sheet
@@ -17,9 +17,7 @@ This script:
 
 | Activity | Distance for 1 Point | Time Equivalent |
 |----------|---------------------|-----------------|
-| Swim | 2 km | ~45 minutes |
 | Run / Walk / Hike | 10 km | ~60 minutes |
-| Bike | 40 km | ~90 minutes |
 
 No cap on points — allows catching up.
 
@@ -62,9 +60,8 @@ The script writes ONLY to the pink "Weekly Strava Mileage" section (cells C7:L30
 
 ## Strava Club
 
-- Club ID: `2231427`
-- URL: https://www.strava.com/clubs/2231427
 - Type: Multisport
+- Club ID and URL are configured privately in `settings/config.ini` (not committed to this repo)
 
 ---
 
