@@ -135,17 +135,15 @@ TIMEZONE = Asia/Singapore
 SCRAP_CLUB_ACTIVITIES = true
 
 [STRAVA]
-CLUB_IDS = 2231427
+CLUB_IDS = <your_club_id>
 # Division assignments (populate with athlete IDs):
 CLUB_MEMBERS_TEAMS = FMD: id1, id2; IND: id3, id4; EDR: id5; BEK: id6; VIC: id7
 
 [GOOGLE_DOCS]
-SHEET_ID = 1buXDfY6HDiksuR7xnhgpWdJlF-Cs8hCYKYGXBs0mSQQ
+SHEET_ID = <your_sheet_id>
 
 [SCORING]
-SWIM_KM_PER_POINT = 2.0
 RUN_KM_PER_POINT = 10.0
-BIKE_KM_PER_POINT = 40.0
 ```
 
 ### Setting Up Divisions
@@ -160,7 +158,7 @@ If `CLUB_MEMBERS_TEAMS` is not set, the script randomly assigns members to divis
 
 1. Enable [Google Sheets API](https://console.cloud.google.com/apis/library/sheets.googleapis.com)
 2. Create a Service Account → download JSON key → save as `settings/keys.json`
-3. Share the Google Sheet with: `strava-google-sheets@silicon-bolt-501511-g6.iam.gserviceaccount.com` (Editor access)
+3. Share the Google Sheet with your service account's email (Editor access) — find this in your `keys.json` under `client_email`
 
 ### Data Persistence
 
