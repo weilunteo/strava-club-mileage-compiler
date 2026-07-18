@@ -1,188 +1,222 @@
 # Strava Club Mileage Compiler
 
-Automated weekly mileage compilation for an inter-division fitness competition (51 participants across 5 divisions), scraping data from a Strava Club and updating a Google Sheet.
+Automated weekly mileage compilation for an inter-division fitness competition, scraping data from a Strava Club and updating a Google Sheet.
 
 ## Overview
 
-This script does not use the Strava API (which requires a paid subscription for club activity data). Instead, it uses Selenium web scraping to extract activity data directly from the Strava website.
+This script does not use the Strava API (which requires a paid subscription for club data). Instead, it uses Selenium web scraping to extract activity data directly from Strava.
 
-This script:
+What it does:
 1. Opens Chrome and waits for manual Strava login (2FA required)
-2. Scrapes the club's individual activities (run, walk, hike)
-3. Assigns athletes to divisions (FMD, IND, EDR, BEK, VIC)
-4. Calculates weekly mileage and points per division
-5. Writes the results directly into a formatted Google Sheet
+2. Scrapes the club's members and individual activities
+3. Maps athletes to divisions (using a name-based roster)
+4. Classifies each activity (Run, Walk, Swim, Bike) using activity type + pace
+5. Calculates weekly mileage & points per division per activity type
+6. Writes results to a formatted 'Sports Challenge' Google Sheet + 'Individual Leaderboard'
 
 ## Point System
 
-| Activity | Distance for 1 Point | Time Equivalent |
-|----------|---------------------|-----------------|
-| Run / Walk / Hike | 10 km | ~60 minutes |
+| Activity | Rate | Distance for 1 pt |
+|----------|------|-------------------|
+| Run (pace < 9 min/km) | 0.10 pt/km | 10 km |
+| Walk (pace ≥ 9 min/km) | 0.05 pt/km | 20 km |
+| Swim | 0.50 pt/km | 2 km |
+| Bike | 0.025 pt/km | 40 km |
 
-No cap on points — allows catching up.
+Run vs Walk is determined automatically from the activity's moving pace. Applies to: Run, Trail Run, Treadmill, Virtual Run, Walk, Hike, Race.
 
 ## Competition Scoring
 
 | Component | Weightage |
 |-----------|-----------|
-| IPPT | 40% (Gold = 3 pts, Silver = 1 pt) — managed manually in sheet |
-| Weekly Strava Mileage | 60% — calculated by this script |
-
-## Divisions
-
-| Division | Members |
-|----------|---------|
-| FMD | ~10 |
-| IND | ~10 |
-| EDR | ~10 |
-| BEK | ~10 |
-| VIC | ~10 |
-
-## Competition Period
-
-- **Week 3**: 13 Jul 2026 (Mon) – 19 Jul 2026 (Sun)
-- **Week 4**: 20 Jul 2026 – 26 Jul 2026
-- ...
-- **Week 23**: 30 Nov 2026 – 6 Dec 2026 (Sun)
+| IPPT | 40% (managed manually in sheet) |
+| Weekly Strava Mileage | 60% (calculated by this script) |
 
 ## Google Sheet Layout
 
-The script writes ONLY to the pink "Weekly Strava Mileage" section (cells C7:L30):
+The script writes to three tabs:
 
-| Section | Rows | Managed by |
-|---------|------|-----------|
-| IPPT (green) | 1-5 | Manual |
-| Weekly Mileage headers | 6 | Fixed (don't touch) |
-| Week 3-23 data | 7-27 | **Script** |
-| Total / Sub Total / Weightage 60% | 28-30 | **Script** |
-| Total Points (yellow) | 31 | Your formula (IPPT + Strava) |
-| Total Batch Mileage (yellow) | 32 | Your formula |
+### Sports Challenge (main tab)
+- Rows 1-5 (IPPT section): untouched
+- Row 6 (headers): untouched
+- Rows 7-27 (Week 3 to Week 23): weekly mileage & points per division per activity type (Run, Walk, Swim, Bike)
+- Row 28 (Sub Total): computed by script
+- Row 29 (Mileage Points): total points per division, computed by script
+- Rows 30-32 (Weightage 60%, Total Points, Total Batch Mileage): untouched (your formulas)
 
-## Strava Club
+Data range written: `C7:AP29`
 
-- Type: Multisport
-- Club ID and URL are configured privately in `settings/config.ini` (not committed to this repo)
+### Individual Leaderboard
+Per-athlete breakdown across all 4 categories, sorted by total points:
+- rank, division, athlete_name, athlete_id
+- run_km, run_pts, walk_km, walk_pts, swim_km, swim_pts, bike_km, bike_pts
+- total_km, total_points, num_activities
 
----
+### Activities
+Incremental raw activity log — grows every week, deduped by activity_id.
 
-## For the Operator (Weekly Runner)
+### Members
+Current club member list with division assignments.
 
-### What you need
-- A Mac/PC with **Python 3** and **Google Chrome** installed
-- Be a member of the Strava club
-- Access to the email associated with the Strava account (for verification codes)
+### Execution Time
+Last-run timestamp.
 
-### How to run (every Monday)
-
-1. **Double-click** `run.command`
-2. Chrome opens → **Log in to Strava** (email + 6-digit code from your email)
-3. Wait for **"✓ DONE!"** message (~3-5 minutes)
-4. Check the Google Sheet — data is updated!
-
-### Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| "Access temporarily suspended" | Strava rate-limited you. Wait 15 min, try again |
-| Chrome doesn't open | Make sure Chrome is installed |
-| Script hangs at "Waiting for dashboard" | Go log in to Strava in the Chrome window |
-| Google Sheets "protected cell" error | Ask Wei Liang to fix sheet permissions |
-| "No module named..." | Open Terminal, run: `pip3 install -r requirements.txt` |
-
----
-
-## For the Developer
-
-### Project Structure
+## Project Structure
 
 ```
 strava-club-mileage-compiler/
-├── main.py                  # Main entry point
-├── push_to_sheets.py        # Push existing data without re-scraping
-├── clear_sheets.py          # Clear Google Sheets test data
-├── run.command              # One-click run script for operator
-├── HOW_TO_RUN.md            # Instructions for the operator
-├── requirements.txt         # Python dependencies
-├── Dockerfile               # For Docker/Railway deployment
+├── main.py                  # Weekly runner
+├── setup_divisions.py       # ONE-TIME: match roster to Strava, save to config
+├── push_to_sheets.py        # Push cached data to Sheets (no scraping)
+├── run.command              # Double-click helper for weekly runs
+├── requirements.txt
+├── README.md
+├── .gitignore
 ├── settings/
-│   ├── config.ini           # Configuration (dates, club ID, divisions, scoring)
-│   ├── config.ini.example   # Template
-│   └── keys.json            # Google Service Account key (DO NOT COMMIT)
+│   ├── config.ini           # Configuration (dates, club ID, scoring)
+│   ├── roster.json          # Division roster (names only)
+│   └── keys.json            # Google service account key (NOT committed)
 ├── src/
-│   ├── __init__.py
-│   ├── strava_scraper.py    # Selenium-based Strava scraper
-│   ├── scoring.py           # Multi-sport point calculation engine
+│   ├── strava_scraper.py    # Selenium scraper for Strava
+│   ├── scoring.py           # Point calculation (pace-based run/walk)
+│   ├── sheets_formatter.py  # Formats data for Google Sheets
 │   ├── google_sheets.py     # Google Sheets API helpers
-│   ├── sheets_formatter.py  # Formats data into competition layout
-│   └── selenium_utils.py    # Chrome WebDriver setup
-├── output/                  # Accumulated CSV data (history)
-│   ├── activities.csv       # All activities (grows each week)
-│   ├── members.csv          # Current member list
-│   └── ...
-└── .github/workflows/
-    └── scrape.yml           # GitHub Actions (not usable due to Strava 2FA)
+│   ├── name_matcher.py      # Fuzzy roster-to-Strava name matcher (rapidfuzz)
+│   └── selenium_utils.py    # Chrome WebDriver config
+└── output/                  # Accumulated CSV history (grows each week)
 ```
 
-### Configuration
+## Setup (One Time)
 
-Edit `settings/config.ini`:
+### 1. Prerequisites
+- Python 3.10+
+- Google Chrome
+- A Strava account that's a member of the club
+
+### 2. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Configure `settings/config.ini`
 
 ```ini
 [GENERAL]
-DATE_MIN = 2026-07-13          # Monday of Week 3
-DATE_MAX = 2026-12-06          # Sunday of Week 23
+DATE_MIN = 2026-07-13     # Monday of Week 3
+DATE_MAX = 2026-12-06     # Sunday of Week 23
 TIMEZONE = Asia/Singapore
 SCRAP_CLUB_ACTIVITIES = true
 
 [STRAVA]
-CLUB_IDS = <your_club_id>
-# Division assignments (populate with athlete IDs):
-CLUB_MEMBERS_TEAMS = FMD: id1, id2; IND: id3, id4; EDR: id5; BEK: id6; VIC: id7
+LOGIN = your_email@example.com
+PASSWORD = your_password
+CLUB_IDS = <your-strava-club-id>
 
 [GOOGLE_DOCS]
-SHEET_ID = <your_sheet_id>
+SHEET_ID = <your-google-sheet-id>
 
 [SCORING]
-RUN_KM_PER_POINT = 10.0
+IPPT_WEIGHTAGE = 0.40
+STRAVA_WEIGHTAGE = 0.60
 ```
 
-### Setting Up Divisions
+### 4. Configure `settings/roster.json`
 
-1. Run the script once to scrape members → check `output/members.csv` for athlete IDs
-2. Assign each athlete to a division in `config.ini` under `CLUB_MEMBERS_TEAMS`
-3. Format: `FMD: 12345, 67890; IND: 11111, 22222; EDR: 33333; BEK: 44444; VIC: 55555`
+List all participants by name under their divisions:
 
-If `CLUB_MEMBERS_TEAMS` is not set, the script randomly assigns members to divisions.
+```json
+{
+  "FMD": ["Name 1", "Name 2", "..."],
+  "IND": ["..."],
+  "EDR": ["..."],
+  "BEK": ["..."],
+  "VIC": ["..."]
+}
+```
 
-### Google Sheets Setup
+### 5. Set up Google Sheets API
 
 1. Enable [Google Sheets API](https://console.cloud.google.com/apis/library/sheets.googleapis.com)
 2. Create a Service Account → download JSON key → save as `settings/keys.json`
-3. Share the Google Sheet with your service account's email (Editor access) — find this in your `keys.json` under `client_email`
+3. Share the Google Sheet with the service account email (Editor access)
 
-### Data Persistence
-
-- `output/activities.csv` accumulates all activities across weeks (never loses history)
-- Each run merges new activities with existing ones (deduplicates by activity_id)
-- The Sports Challenge sheet always shows Week 3-23 calculated from ALL accumulated data
-
-### Command Line Options
+### 6. Match roster to Strava (once, when everyone's joined)
 
 ```bash
-python main.py                    # Full run (scrape + update sheets)
-python main.py --no-sheets        # Scrape only, save CSVs locally
-python main.py --leaderboard-only # Skip individual activities
-python main.py --headless         # No browser GUI (won't work with 2FA)
-python push_to_sheets.py          # Push existing CSV data to sheets (no Strava)
-python clear_sheets.py            # Clear all Google Sheets data
+python setup_divisions.py
 ```
 
-### Limitations
+This:
+- Scrapes current Strava club members
+- Fuzzy-matches roster names → Strava athlete IDs
+- Writes `CLUB_MEMBERS_TEAMS = ...` into `config.ini`
+- Reports unmatched names (people not yet on Strava)
 
-- **Strava 2FA**: Requires manual login every run (email verification code). Full automation is not possible.
-- **Activity feed limit**: Strava limits how far back you can scroll in the club feed. Run weekly to avoid missing activities.
-- **Rate limiting**: Too many login attempts → "temporarily suspended". Wait 15 minutes.
-- **Leaderboard**: Only shows current + previous week. Individual activities are more reliable for historical data.
+Re-run this whenever new members join the club.
+
+## Weekly Run
+
+### Option A — Double-click (for non-technical users)
+Double-click `run.command`. Chrome opens → log in to Strava → wait for "Done!".
+
+### Option B — Command line
+```bash
+python main.py
+```
+
+The weekly flow:
+1. Opens Chrome → wait for manual Strava login
+2. Scrapes members (deduplicates against cache)
+3. Scrapes leaderboard + individual activities
+4. Merges with cached `output/activities.csv` (preserves history)
+5. Calculates weekly points and writes to Google Sheet
+
+### Command line options
+
+```bash
+python main.py                    # Full run (scrape + push to sheets)
+python main.py --no-sheets        # Scrape only, save CSVs locally
+python main.py --leaderboard-only # Skip individual activities
+python push_to_sheets.py          # Push cached data (no Strava scrape)
+```
+
+## Fuzzy Name Matching
+
+Roster names often differ from Strava display names (nicknames, initials, reversed order, concatenated names). The matcher handles:
+
+- Reordered names (First Middle Last ↔ Last First Middle)
+- Concatenated names (Wei Xiang ↔ Weixiang)
+- Partial names / nicknames (extra middle names, dropped suffixes)
+- Initials (Full Name ↔ Initials, or `F Lastname`)
+
+Uses [rapidfuzz](https://github.com/rapidfuzz/RapidFuzz) with a custom initials heuristic. Threshold defaults to 0.7.
+
+## Data Persistence
+
+- `output/activities.csv` accumulates all scraped activities across weeks (deduped by `activity_id`)
+- `output/members.csv` reflects the latest scraped member list
+- The 'Sports Challenge' tab always recalculates from the full accumulated history
+
+**Do not delete `output/activities.csv`** — it's your competition history. Strava's feed only shows recent activities, so weekly scraping + local accumulation is how history is preserved.
+
+## Limitations
+
+- **Strava 2FA**: Requires manual email verification code on each run. No headless automation.
+- **Activity feed limit**: Strava caps how far back you can scroll. Run at least weekly to avoid missing activities.
+- **Rate limiting**: Too many login attempts → account temporarily suspended. Wait ~15 minutes.
+- **Leaderboard**: Only shows current + previous week and doesn't distinguish activity types. Individual activities are used instead for accurate multi-sport scoring.
+
+## Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| "Access temporarily suspended" | Strava rate-limited. Wait 15 minutes. |
+| Chrome doesn't open | Make sure Chrome is installed. |
+| "No module named ..." | Run `pip install -r requirements.txt` |
+| Google Sheets "protected cell" error | Remove sheet protection or add service account to editors. |
+| Members sheet has fewer names than expected | Some roster members haven't joined the Strava club yet. Re-run `setup_divisions.py`. |
+| Unmatched roster names after setup | Person may have a very different Strava display name — check `output/unmatched_roster.csv`. |
 
 ## Legal
 

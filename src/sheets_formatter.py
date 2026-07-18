@@ -1,75 +1,108 @@
 """
-Formats and writes scraped Strava data directly into the 'Sports Challenge'
-Google Sheet tab - ONLY the mileage/points data cells.
+Formats and writes scraped Strava data into the 'Sports Challenge' Google Sheet.
 
-Everything else in the sheet is fixed and managed by you:
-- Row 1-5: IPPT section (green) — untouched
-- Row 6: Headers (Mileage/Points) — untouched
-- Rows 7-27 columns A-B: Week labels — untouched
-- Rows 7-27 columns C-L: DATA CELLS — written by this script
-- Row 28: Total — untouched (your formula)
-- Row 29: Sub Total — untouched (your formula)
-- Row 30: Weightage (60%) — untouched (your formula)
-- Row 31: Total Points — untouched (your formula)
-- Row 32: Total Batch Mileage — untouched (your formula)
+New sheet layout (per division: Run | Walk | Swim | Bike, each with Mileage + Points):
 
-The script ONLY writes to C7:L27 (the 21 week rows of mileage/points data).
+  Cols per division = 8 (Run.mi, Run.pt, Walk.mi, Walk.pt, Swim.mi, Swim.pt, Bike.mi, Bike.pt)
+  Total data cols = 5 divisions × 8 = 40
+
+  Row 6: Sub-headers (Run/Walk/Swim/Bike x Mileage/Points) - fixed in sheet
+  Rows 7-27: Week 3 through Week 23 (data written here)
+  Row 28: Sub Total (mileage/points per activity type per division)
+  Row 29: Mileage Points (sum of points per division, one column each)
+  Row 30: Weightage (60%) — your formula (untouched)
+  Row 31: Total Points — your formula (untouched)
+  Row 32: Total Batch Mileage — your formula (untouched)
+
+The script writes ONLY the data cells (weekly mileage/points + Sub Total + Mileage Points).
+Column ranges depend on your final sheet layout — configured below.
 """
 
 import pandas as pd
 from .google_sheets import _ensure_sheet_exists
+from .scoring import classify_activity, calculate_points
 
 
 DIVISIONS = ['FMD', 'IND', 'EDR', 'BEK', 'VIC']
+CATEGORIES = ['run', 'walk', 'swim', 'bike']  # Order matches sheet columns per division
 WEEKS = [f'Week {i}' for i in range(3, 24)]  # Week 3 to Week 23
 
+# Data starts at column C (col A/B are labels)
+# Each division = 8 columns (4 categories × 2 [mileage, points])
+DATA_START_COL = 'C'
+DATA_END_COL_INDEX = 2 + (len(DIVISIONS) * len(CATEGORIES) * 2) - 1  # 0-indexed, col A=0
+# 2 + 40 - 1 = 41 -> column index 41 = "AP"
 
-def build_weekly_data_cells(weekly_data: dict) -> list[list]:
+# Row ranges
+FIRST_WEEK_ROW = 7   # Week 3
+LAST_WEEK_ROW = 27   # Week 23
+SUB_TOTAL_ROW = 28
+MILEAGE_POINTS_ROW = 29
+
+
+def _col_letter(idx: int) -> str:
+    """Convert 0-indexed column number to letter (0=A, 25=Z, 26=AA)."""
+    result = ''
+    n = idx
+    while True:
+        result = chr(ord('A') + (n % 26)) + result
+        n = n // 26 - 1
+        if n < 0:
+            break
+    return result
+
+
+DATA_END_COL = _col_letter(DATA_END_COL_INDEX)
+
+
+def build_weekly_rows(weekly_data: dict) -> list[list]:
     """
-    Build the data values for C7:L30.
-    Rows 7-27: Weekly mileage/points per division (21 rows)
-    Row 28: Total (sum of mileage/points per division)
-    Row 29: Sub Total (same as Total)
-    Row 30: Weightage (60%) = points * 0.6
+    Build rows for Week 3 to Week 23 + Sub Total + Mileage Points row.
+
+    weekly_data[division][week][category] = {'mileage': X, 'points': Y}
     """
     rows = []
 
-    division_totals_mileage = {div: 0.0 for div in DIVISIONS}
-    division_totals_points = {div: 0.0 for div in DIVISIONS}
+    # Running totals per division per category
+    totals = {
+        div: {cat: {'mileage': 0.0, 'points': 0.0} for cat in CATEGORIES}
+        for div in DIVISIONS
+    }
 
-    # Rows 7-27: Week 3 to Week 23
+    # Rows 7-27: weekly data
     for week in WEEKS:
         row = []
         for div in DIVISIONS:
-            if div in weekly_data and week in weekly_data[div]:
-                mileage = round(weekly_data[div][week].get('mileage', 0), 1)
-                points = round(weekly_data[div][week].get('points', 0), 1)
-            else:
-                mileage = 0
-                points = 0
-            row.extend([mileage, points])
-            division_totals_mileage[div] += mileage
-            division_totals_points[div] += points
+            for cat in CATEGORIES:
+                cell = weekly_data.get(div, {}).get(week, {}).get(cat, {})
+                mileage = round(cell.get('mileage', 0), 1)
+                points = round(cell.get('points', 0), 2)
+                row.extend([mileage, points])
+                totals[div][cat]['mileage'] += mileage
+                totals[div][cat]['points'] += points
         rows.append(row)
 
-    # Row 28: Total
-    row_total = []
-    for div in DIVISIONS:
-        row_total.extend([round(division_totals_mileage[div], 1), round(division_totals_points[div], 1)])
-    rows.append(row_total)
-
-    # Row 29: Sub Total
+    # Row 28: Sub Total per category per division
     row_subtotal = []
     for div in DIVISIONS:
-        row_subtotal.extend([round(division_totals_mileage[div], 1), round(division_totals_points[div], 1)])
+        for cat in CATEGORIES:
+            row_subtotal.extend([
+                round(totals[div][cat]['mileage'], 1),
+                round(totals[div][cat]['points'], 2),
+            ])
     rows.append(row_subtotal)
 
-    # Row 30: Weightage (60%)
-    row_weightage = []
+    # Row 29: Mileage Points = sum of all category points per division
+    #   Layout per division (8 cols): we put the total in the first cell, others blank
+    #   Actually, from your image "Mileage Points" appears as a single number per division.
+    #   So we put the sum in the first column of each division and leave the rest blank.
+    row_mileage_points = []
     for div in DIVISIONS:
-        weighted = round(division_totals_points[div] * 0.6, 2)
-        row_weightage.extend([weighted, ''])
-    rows.append(row_weightage)
+        div_total_points = sum(totals[div][cat]['points'] for cat in CATEGORIES)
+        row_mileage_points.append(round(div_total_points, 2))
+        # Fill remaining 7 cols with empty string
+        row_mileage_points.extend([''] * 7)
+    rows.append(row_mileage_points)
 
     return rows
 
@@ -77,82 +110,157 @@ def build_weekly_data_cells(weekly_data: dict) -> list[list]:
 def prepare_weekly_data_from_activities(
     activities_df: pd.DataFrame,
     members_df: pd.DataFrame,
-    scoring_config: dict,
     week_start_date: str,
+    scoring_config: dict = None,  # kept for backward compatibility, unused now
 ) -> dict:
     """
-    Transform activities DataFrame into the weekly_data dict format.
+    Transform activities into: {division: {week: {category: {mileage, points}}}}
 
-    Parameters:
-        activities_df: DataFrame with [athlete_id, activity_type, distance, activity_date]
-        members_df: DataFrame with [athlete_id, athlete_team]
-        scoring_config: dict with swim/run/bike km_per_point
-        week_start_date: The Monday date of Week 3 (e.g. '2026-07-13')
-
-    Returns:
-        dict like {'FMD': {'Week 3': {'mileage': 80, 'points': 8.0}, ...}, ...}
+    Uses activity pace to distinguish Run vs Walk (>=9 min/km => Walk).
     """
-    from .scoring import classify_activity, calculate_points
-
     if activities_df.empty:
         return {}
 
-    swim_km = scoring_config.get('swim_km_per_point', 2.0)
-    run_km = scoring_config.get('run_km_per_point', 10.0)
-    bike_km = scoring_config.get('bike_km_per_point', 40.0)
+    df = activities_df.copy()
 
     # Merge with division
-    df = activities_df.copy()
     df = df.merge(
         members_df[['athlete_id', 'athlete_team']].drop_duplicates(),
         on='athlete_id',
         how='left',
     )
     df = df[df['athlete_team'].notna()].copy()
-
     if df.empty:
         return {}
 
-    # Classify and calculate points
-    df['activity_category'] = df['activity_type'].apply(classify_activity)
+    # Numeric columns
     df['distance'] = pd.to_numeric(df['distance'], errors='coerce').fillna(0)
+    df['moving_time'] = pd.to_numeric(df.get('moving_time', 0), errors='coerce').fillna(0)
     df['distance_km'] = df['distance'] / 1000.0
-    df['points'] = df.apply(
-        lambda row: calculate_points(
-            row['distance'], row['activity_category'], swim_km, run_km, bike_km
-        ),
+
+    # Classify with pace-based rule
+    df['activity_category'] = df.apply(
+        lambda row: classify_activity(row['activity_type'], row['distance'], row['moving_time']),
         axis=1,
     )
 
-    # Determine week number based on activity_date relative to week_start_date
-    # week_start_date = Monday of Week 3 (13 Jul 2026)
-    # Week 3: 13-19 Jul, Week 4: 20-26 Jul, ... Week 23: 30 Nov - 6 Dec
+    # Calculate points
+    df['points'] = df.apply(
+        lambda row: calculate_points(row['distance'], row['activity_category']),
+        axis=1,
+    )
+
+    # Week number
     df['activity_date'] = pd.to_datetime(df['activity_date'])
     competition_start = pd.to_datetime(week_start_date)
-
     df['days_since_start'] = (df['activity_date'] - competition_start).dt.days
-    df['week_num'] = (df['days_since_start'] // 7) + 3  # Week 3 is the first week
+    df['week_num'] = (df['days_since_start'] // 7) + 3
     df['week_label'] = 'Week ' + df['week_num'].astype(int).astype(str)
 
-    # Filter only valid weeks (3-23) and activities on/after competition start
+    # Filter valid weeks
     df = df[(df['days_since_start'] >= 0) & (df['week_num'] >= 3) & (df['week_num'] <= 23)].copy()
 
-    # Aggregate by division and week
+    # Only categories that count
+    df = df[df['activity_category'].isin(CATEGORIES)].copy()
+
+    # Aggregate
     weekly_data = {}
     for div in DIVISIONS:
         div_df = df[df['athlete_team'] == div]
         weekly_data[div] = {}
-
         for week in WEEKS:
             week_df = div_df[div_df['week_label'] == week]
-            mileage = week_df['distance_km'].sum()
-            points = week_df['points'].sum()
-            weekly_data[div][week] = {
-                'mileage': round(mileage, 1),
-                'points': round(points, 1),
-            }
+            weekly_data[div][week] = {}
+            for cat in CATEGORIES:
+                cat_df = week_df[week_df['activity_category'] == cat]
+                weekly_data[div][week][cat] = {
+                    'mileage': round(cat_df['distance_km'].sum(), 1),
+                    'points': round(cat_df['points'].sum(), 2),
+                }
 
     return weekly_data
+
+
+def build_individual_leaderboard(
+    activities_df: pd.DataFrame,
+    members_df: pd.DataFrame,
+    week_start_date: str,
+) -> pd.DataFrame:
+    """
+    Build a per-athlete leaderboard with points breakdown across all 4 categories.
+
+    Returns DataFrame sorted by total_points descending, with columns:
+        rank, division, athlete_name, athlete_id,
+        run_km, run_pts, walk_km, walk_pts, swim_km, swim_pts, bike_km, bike_pts,
+        total_km, total_points, num_activities
+    """
+    if activities_df.empty:
+        return pd.DataFrame()
+
+    df = activities_df.copy()
+
+    # Merge division + athlete_name (from members_df, preferred over activity data)
+    df = df.merge(
+        members_df[['athlete_id', 'athlete_name', 'athlete_team']].drop_duplicates(),
+        on='athlete_id',
+        how='left',
+        suffixes=('', '_m'),
+    )
+    if 'athlete_name_m' in df.columns:
+        df['athlete_name'] = df['athlete_name_m'].fillna(df.get('athlete_name'))
+        df = df.drop(columns=['athlete_name_m'])
+
+    df = df[df['athlete_team'].notna()].copy()
+    if df.empty:
+        return pd.DataFrame()
+
+    # Numeric + classify
+    df['distance'] = pd.to_numeric(df['distance'], errors='coerce').fillna(0)
+    df['moving_time'] = pd.to_numeric(df.get('moving_time', 0), errors='coerce').fillna(0)
+    df['distance_km'] = df['distance'] / 1000.0
+    df['activity_category'] = df.apply(
+        lambda row: classify_activity(row['activity_type'], row['distance'], row['moving_time']),
+        axis=1,
+    )
+    df['points'] = df.apply(
+        lambda row: calculate_points(row['distance'], row['activity_category']),
+        axis=1,
+    )
+
+    # Filter to competition period
+    df['activity_date'] = pd.to_datetime(df['activity_date'])
+    competition_start = pd.to_datetime(week_start_date)
+    df = df[df['activity_date'] >= competition_start].copy()
+
+    if df.empty:
+        return pd.DataFrame()
+
+    # Pivot per athlete
+    def cat_sum(g, cat, col):
+        return g[g['activity_category'] == cat][col].sum()
+
+    rows = []
+    for (aid, name, team), g in df.groupby(['athlete_id', 'athlete_name', 'athlete_team']):
+        rows.append({
+            'division': team,
+            'athlete_name': name,
+            'athlete_id': aid,
+            'run_km': round(cat_sum(g, 'run', 'distance_km'), 1),
+            'run_pts': round(cat_sum(g, 'run', 'points'), 2),
+            'walk_km': round(cat_sum(g, 'walk', 'distance_km'), 1),
+            'walk_pts': round(cat_sum(g, 'walk', 'points'), 2),
+            'swim_km': round(cat_sum(g, 'swim', 'distance_km'), 1),
+            'swim_pts': round(cat_sum(g, 'swim', 'points'), 2),
+            'bike_km': round(cat_sum(g, 'bike', 'distance_km'), 1),
+            'bike_pts': round(cat_sum(g, 'bike', 'points'), 2),
+            'total_km': round(g['distance_km'].sum(), 1),
+            'total_points': round(g['points'].sum(), 2),
+            'num_activities': len(g),
+        })
+
+    lb = pd.DataFrame(rows).sort_values('total_points', ascending=False, ignore_index=True)
+    lb.insert(0, 'rank', range(1, len(lb) + 1))
+    return lb
 
 
 def write_sports_challenge_sheet(
@@ -161,20 +269,21 @@ def write_sports_challenge_sheet(
     sheet_id: str,
     sheet_name: str,
     weekly_data: dict,
-    ippt_data: dict | None = None,
+    ippt_data: dict | None = None,  # unused, IPPT is manual
 ) -> None:
     """
-    Write ONLY the weekly mileage/points data cells to C7:L27.
-    Does NOT touch headers, labels, formulas, or any other cells.
+    Write weekly data + Sub Total + Mileage Points to the sheet.
+    Range: C7 to <end column>29
     """
     _ensure_sheet_exists(service, sheet_id, sheet_name)
 
-    grid = build_weekly_data_cells(weekly_data=weekly_data)
+    grid = build_weekly_rows(weekly_data=weekly_data)
 
-    # Write to C7:L30 — weeks data + Total + Sub Total + Weightage (60%)
+    range_str = f"'{sheet_name}'!{DATA_START_COL}{FIRST_WEEK_ROW}:{DATA_END_COL}{MILEAGE_POINTS_ROW}"
+
     service.spreadsheets().values().update(
         spreadsheetId=sheet_id,
-        range=f"'{sheet_name}'!C7:L30",
+        range=range_str,
         valueInputOption='USER_ENTERED',
         body={'values': grid},
     ).execute()
