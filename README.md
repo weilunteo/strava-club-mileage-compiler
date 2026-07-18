@@ -34,7 +34,7 @@ Run vs Walk is determined automatically from the activity's moving pace. Applies
 
 ## Google Sheet Layout
 
-The script writes to three tabs:
+The script writes to a personal google sheet and three tabs:
 
 ### Sports Challenge (main tab)
 - Rows 1-5 (IPPT section): untouched
