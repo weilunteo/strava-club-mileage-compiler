@@ -531,11 +531,18 @@ def _scrape_single_activity(driver, activity_id: str, club_id: str, timezone: st
         stats_dict = dict(zip(inline_stats[1::2], inline_stats[0::2]))
 
         if 'Distance' in stats_dict:
-            dist = stats_dict['Distance']
-            dist = re.sub(r',', '', dist)
-            dist = re.sub(r'\s*km$', '', dist)
-            dist = re.sub(r'\s*m$', '', dist)  # For Swim distances in meters
-            d['distance'] = float(dist) * 1000  # Convert km to meters
+            dist_str = stats_dict['Distance']
+            dist_clean = re.sub(r',', '', dist_str)
+            # Check units BEFORE stripping - order matters (km first, then m)
+            if re.search(r'\bkm\b', dist_clean):
+                dist_val = re.sub(r'\s*km\b', '', dist_clean).strip()
+                d['distance'] = float(dist_val) * 1000  # km -> meters
+            elif re.search(r'\bm\b', dist_clean):
+                dist_val = re.sub(r'\s*m\b', '', dist_clean).strip()
+                d['distance'] = float(dist_val)  # already in meters (Swim)
+            else:
+                # No unit found - assume km
+                d['distance'] = float(dist_clean) * 1000
         elif any('km' in v for v in inline_stats):
             for val in inline_stats:
                 if 'km' in val:
