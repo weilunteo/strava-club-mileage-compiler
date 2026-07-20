@@ -90,7 +90,20 @@ def main():
     strava_login = config.get('STRAVA', 'LOGIN', fallback='')
     strava_password = config.get('STRAVA', 'PASSWORD', fallback='')
     scrap_activities = config.getboolean('GENERAL', 'SCRAP_CLUB_ACTIVITIES', fallback=True)
+    current_week_only = config.getboolean('GENERAL', 'SCRAPE_CURRENT_WEEK_ONLY', fallback=True)
     sheet_id = config.get('GOOGLE_DOCS', 'SHEET_ID', fallback='')
+
+    # If SCRAPE_CURRENT_WEEK_ONLY, compute date range for this week (Mon-Sun)
+    # Old activities are preserved from output/activities.csv cache.
+    if current_week_only:
+        today = pd.Timestamp.now(tz=timezone).replace(tzinfo=None)
+        monday = today - pd.Timedelta(days=today.weekday())
+        sunday = monday + pd.Timedelta(days=6)
+        scrape_date_min = monday.strftime('%Y-%m-%d')
+        scrape_date_max = sunday.strftime('%Y-%m-%d')
+    else:
+        scrape_date_min = date_min
+        scrape_date_max = date_max
 
     google_api_key = os.path.join(os.path.dirname(__file__), 'settings', 'keys.json')
     if not os.path.exists(google_api_key):
@@ -103,7 +116,11 @@ def main():
     print("STRAVA CLUB MILEAGE COMPILER")
     print("=" * 60)
     print(f"Club IDs: {club_ids}")
-    print(f"Date range: {date_min} to {date_max}")
+    print(f"Competition range: {date_min} to {date_max}")
+    if current_week_only:
+        print(f"Scrape range (this week only): {scrape_date_min} to {scrape_date_max}")
+    else:
+        print(f"Scrape range: full competition (may hit Strava feed limit)")
     print(f"Divisions configured: {list(division_teams.keys()) if division_teams else 'None'}")
     print("Points: Run 0.1/km | Walk 0.05/km | Swim 0.5/km | Bike 0.025/km")
     print("=" * 60)
@@ -151,8 +168,8 @@ def main():
     print("\n[3/5] Scraping club leaderboard...")
     leaderboard_df = strava_club_leaderboard(
         club_ids=club_ids,
-        filter_date_min=date_min,
-        filter_date_max=date_max,
+        filter_date_min=scrape_date_min,
+        filter_date_max=scrape_date_max,
         timezone=timezone,
     )
     print(f"  Scraped {len(leaderboard_df)} leaderboard entries")
@@ -167,8 +184,8 @@ def main():
         new_df = strava_club_activities(
             club_ids=club_ids,
             filter_activities_type=None,
-            filter_date_min=date_min,
-            filter_date_max=date_max,
+            filter_date_min=scrape_date_min,
+            filter_date_max=scrape_date_max,
             timezone=timezone,
         )
         print(f"  Scraped {len(new_df)} new activities")
